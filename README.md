@@ -1,0 +1,2 @@
+# Trascriber
+Trascrittore AudioToText
