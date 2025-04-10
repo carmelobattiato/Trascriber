@@ -8,290 +8,213 @@ import threading
 import queue
 from pydub import AudioSegment
 import soundfile # Use soundfile for reliable WAV writing
+import sys # Import sys
+
+# Debug Flag for Audio Handler
+DEBUG_AUDIO = True
 
 class AudioHandler:
     DEFAULT_SAMPLE_RATE = 44100
     DEFAULT_CHANNELS = 1
-    # Using a chunk size compatible with typical audio processing
-    # Smaller chunk size leads to more frequent updates but higher overhead
     CHUNK_SIZE = 1024
 
     def __init__(self, status_callback=None, waveform_callback=None):
-        """
-        Initializes the AudioHandler.
-
-        Args:
-            status_callback: A function to call with status updates (e.g., "Recording...").
-            waveform_callback: A function to call with new audio chunks for waveform display.
-        """
+        # ... (init attributes same as before) ...
         self.sample_rate = self.DEFAULT_SAMPLE_RATE
         self.channels = self.DEFAULT_CHANNELS
         self.recording = False
         self.playing = False
-        self.recorded_frames = []
+        self.recorded_frames = [] # Keep using this for now to store full recording
+        self.audio_data = None
         self.stream = None
-        self.audio_data = None # Holds the complete recorded or loaded audio data as numpy array
-        self.audio_queue = queue.Queue() # Queue for thread-safe communication of audio chunks
+        self.audio_queue = queue.Queue()
 
-        # Callbacks for GUI updates
         self.status_callback = status_callback
-        self.waveform_callback = waveform_callback
+        # waveform_callback is not used when polling queue
+        # self.waveform_callback = waveform_callback
 
-        # Ensure Audio output directory exists
         self.audio_dir = "Audio"
         os.makedirs(self.audio_dir, exist_ok=True)
 
     def _notify_status(self, message):
-        """Safely notify the GUI about status changes."""
+        # ... (same as before) ...
         if self.status_callback:
             try:
                 self.status_callback(message)
             except Exception as e:
                 print(f"Error in status callback: {e}")
 
-    def _notify_waveform(self, data_chunk):
-        """Safely send audio data chunks to the GUI for waveform update."""
-        if self.waveform_callback:
-             try:
-                 # Put data into the queue for the main thread to process
-                 self.audio_queue.put(data_chunk.copy())
-             except Exception as e:
-                 print(f"Error in waveform callback queueing: {e}")
-
+    # Removed _notify_waveform as we poll the queue
 
     def _audio_callback(self, indata, frames, time, status):
         """This is called (from a separate thread) for each audio block."""
         if status:
-            print(f"Stream status: {status}", file=sys.stderr) # Log stream errors
+            print(f"Stream status: {status}", file=sys.stderr)
         if self.recording:
-            # Append raw data; conversion happens when stopping
-            self.recorded_frames.append(indata.copy())
-            # Notify GUI about the new chunk for waveform
-            self._notify_waveform(indata)
+            # Copy data for both queue and local storage (if used)
+            chunk_copy = indata.copy()
+
+            # --- Add to queue for real-time display ---
+            if self.audio_queue: # Check if queue exists
+                self.audio_queue.put(chunk_copy)
+                # --- DEBUG PRINT: Confirm data is being added to queue ---
+                if DEBUG_AUDIO:
+                     if not hasattr(self, '_callback_print_counter'): self._callback_print_counter = 0
+                     if self._callback_print_counter % 20 == 0: # Print every ~20 chunks
+                          print(f"AUDIO HANDLER: Queueing chunk - shape={chunk_copy.shape}, dtype={chunk_copy.dtype}, frames={frames}")
+                     self._callback_print_counter += 1
+                # ----------------------------------------------------------
+
+            # --- Add to local list for full recording storage ---
+            # Ensure self.recorded_frames exists and append
+            if hasattr(self, 'recorded_frames') and isinstance(self.recorded_frames, list):
+                 self.recorded_frames.append(chunk_copy)
+            else:
+                 # This case shouldn't happen if initialized correctly, but handle defensively
+                 print("AUDIO HANDLER WARNING: recorded_frames list not found or invalid in callback.")
+
 
     def start_recording(self):
-        if self.recording:
-            print("Already recording.")
-            return
-
-        print(f"Starting recording: SR={self.sample_rate}, Channels={self.channels}")
+        # ... (mostly same as before) ...
+        if self.recording: return
+        if DEBUG_AUDIO: print(f"AUDIO HANDLER: Starting recording - SR={self.sample_rate}, Ch={self.channels}")
         self.recording = True
-        self.recorded_frames = [] # Clear previous recording
-        self.audio_data = None    # Clear previous complete data
+        # Clear queue from previous runs
+        while not self.audio_queue.empty():
+            try: self.audio_queue.get_nowait()
+            except queue.Empty: break
+        self.recorded_frames = [] # Reset local frame list
+        self.audio_data = None
 
         try:
-             # Check available devices (optional, good for debugging)
-             # print(sd.query_devices())
-
-            # Use a non-blocking stream with a callback
             self.stream = sd.InputStream(
                 samplerate=self.sample_rate,
                 channels=self.channels,
                 callback=self._audio_callback,
-                blocksize=self.CHUNK_SIZE # Process audio in manageable chunks
-                # dtype='float32' # Default for sounddevice
+                blocksize=self.CHUNK_SIZE
             )
             self.stream.start()
             self._notify_status("Recording...")
-            print("Stream started.")
+            if DEBUG_AUDIO: print("AUDIO HANDLER: Stream started.")
         except Exception as e:
             self.recording = False
-            self._notify_status(f"Error starting recording: {e}")
-            print(f"Error starting recording stream: {e}")
-            self.stream = None # Ensure stream is None if failed
-
+            error_msg = f"Error starting recording: {e}"
+            self._notify_status(error_msg)
+            print(f"AUDIO HANDLER ERROR: {error_msg}")
+            self.stream = None
 
     def stop_recording(self):
-        if not self.recording:
-            print("Not recording.")
-            return
-
-        print("Stopping recording...")
-        self.recording = False
+        # ... (logic remains same, depends on self.recorded_frames) ...
+        if not self.recording: return
+        if DEBUG_AUDIO: print("AUDIO HANDLER: Stopping recording...")
+        self.recording = False # Set flag first
 
         if self.stream:
             try:
                 self.stream.stop()
                 self.stream.close()
-                print("Stream stopped and closed.")
-            except Exception as e:
-                 print(f"Error stopping/closing stream: {e}")
-            finally:
-                 self.stream = None
+                if DEBUG_AUDIO: print("AUDIO HANDLER: Stream stopped and closed.")
+            except Exception as e: print(f"AUDIO HANDLER ERROR: stopping/closing stream: {e}")
+            finally: self.stream = None
         else:
-             print("No active stream found to stop.")
+            # --- FIX: Corrected Syntax ---
+            if DEBUG_AUDIO:
+                 print("AUDIO HANDLER: No active stream found to stop.")
+            # -----------------------------
 
-
-        if self.recorded_frames:
-            try:
-                # Concatenate all recorded frames (list of numpy arrays)
-                self.audio_data = np.concatenate(self.recorded_frames, axis=0)
-                self.recorded_frames = [] # Clear chunk buffer
-                print(f"Recording stopped. Total samples: {len(self.audio_data)}")
-                self._notify_status("Recording finished. Ready to save.")
-                # Provide the full waveform data once recording stops
-                self._notify_waveform(self.audio_data)
-                return self.audio_data
-            except ValueError as e:
-                 # Handle case where recorded_frames might be empty or have shape issues
-                 print(f"Error concatenating frames: {e}")
+        if hasattr(self, 'recorded_frames') and self.recorded_frames:
+             try:
+                 self.audio_data = np.concatenate(self.recorded_frames, axis=0)
+                 self.recorded_frames = [] # Clear buffer
+                 if DEBUG_AUDIO: print(f"AUDIO HANDLER: Recording stopped. Concatenated frames. Total samples: {len(self.audio_data)}")
+                 self._notify_status("Recording finished. Ready to save.")
+                 return self.audio_data
+             except ValueError as e:
+                 print(f"AUDIO HANDLER ERROR: concatenating frames: {e}")
                  self._notify_status("Error processing recording.")
-                 self.audio_data = None
-                 return None
-            except Exception as e:
-                 print(f"Unexpected error processing recorded data: {e}")
+                 self.audio_data = None; return None
+             except Exception as e:
+                 print(f"AUDIO HANDLER ERROR: processing recorded data: {e}")
                  self._notify_status("Error processing recording.")
-                 self.audio_data = None
-                 return None
-
+                 self.audio_data = None; return None
         else:
-            print("No frames recorded.")
-            self._notify_status("Recording stopped (no data).")
-            self.audio_data = None
-            return None
-
+             print("AUDIO HANDLER WARNING: No locally stored frames found after stopping. Was data collected?")
+             self._notify_status("Recording stopped (no processed data).")
+             self.audio_data = None; return None
 
     def save_audio(self, filename, file_format="wav"):
-        """Saves the recorded audio data to a file."""
+        # ... (same as before) ...
         if self.audio_data is None or len(self.audio_data) == 0:
-            self._notify_status("No audio data to save.")
-            print("Save error: No audio data available.")
+            self._notify_status("No audio data to save."); print("Save error: No audio data available.")
             return None, "No audio data available."
-
-        # Ensure filename has the correct extension
         base, _ = os.path.splitext(filename)
         filepath = os.path.join(self.audio_dir, f"{base}.{file_format.lower()}")
-        print(f"Attempting to save audio to: {filepath} in format: {file_format}")
-
+        if DEBUG_AUDIO: print(f"AUDIO HANDLER: Attempting save to {filepath} (format: {file_format})")
         try:
-            # Ensure data is in a suitable format (float32 is good for soundfile)
-            # If data is not float32, convert it (though sounddevice usually provides float32)
-            if self.audio_data.dtype != np.float32:
-                # Attempt conversion, normalize if necessary (e.g., if coming from int16)
-                 if np.issubdtype(self.audio_data.dtype, np.integer):
-                     max_val = np.iinfo(self.audio_data.dtype).max
-                     audio_to_save = self.audio_data.astype(np.float32) / max_val
-                 else: # Attempt direct conversion for other float types
-                     audio_to_save = self.audio_data.astype(np.float32)
-
-                 print(f"Converted audio data from {self.audio_data.dtype} to {audio_to_save.dtype}")
-            else:
-                 audio_to_save = self.audio_data
-
-            # Clamp values just in case, although normalization should handle it
+            if self.audio_data.dtype != np.float32: audio_to_save = self.audio_data.astype(np.float32)
+            else: audio_to_save = self.audio_data
             audio_to_save = np.clip(audio_to_save, -1.0, 1.0)
 
-
             if file_format.lower() == "wav":
-                # Using soundfile for robust WAV writing
-                soundfile.write(filepath, audio_to_save, self.sample_rate, subtype='PCM_16') # Common WAV format
-                # wave module alternative (more manual):
-                # wf = wave.open(filepath, 'wb')
-                # wf.setnchannels(self.channels)
-                # wf.setsampwidth(2)  # 2 bytes for 16-bit audio
-                # wf.setframerate(self.sample_rate)
-                # # Convert float32 to int16
-                # audio_int16 = (audio_to_save * 32767).astype(np.int16)
-                # wf.writeframes(audio_int16.tobytes())
-                # wf.close()
-                self._notify_status(f"Saved as WAV: {os.path.basename(filepath)}")
-                print(f"Successfully saved WAV: {filepath}")
-                return filepath, None # Return path and no error
-
+                soundfile.write(filepath, audio_to_save, self.sample_rate, subtype='PCM_16')
+                msg = f"Saved WAV: {os.path.basename(filepath)}"
             elif file_format.lower() == "mp3":
-                # Using pydub for MP3 conversion (requires ffmpeg)
-                # Convert numpy array to pydub AudioSegment
-                # Ensure data is scaled correctly for int16 if needed by pydub
-                # pydub works well with int16 representation
                 audio_int16 = (audio_to_save * 32767).astype(np.int16)
-                audio_segment = AudioSegment(
-                    audio_int16.tobytes(),
-                    frame_rate=self.sample_rate,
-                    sample_width=audio_int16.dtype.itemsize, # Should be 2 for int16
-                    channels=self.channels
-                )
-                # Export as MP3
+                audio_segment = AudioSegment(audio_int16.tobytes(), frame_rate=self.sample_rate, sample_width=audio_int16.dtype.itemsize, channels=self.channels)
                 audio_segment.export(filepath, format="mp3")
-                self._notify_status(f"Saved as MP3: {os.path.basename(filepath)}")
-                print(f"Successfully saved MP3: {filepath}")
-                return filepath, None # Return path and no error
-
+                msg = f"Saved MP3: {os.path.basename(filepath)}"
             else:
                 error_msg = f"Unsupported file format: {file_format}"
-                self._notify_status(error_msg)
-                print(error_msg)
+                self._notify_status(error_msg); print(error_msg)
                 return None, error_msg
 
+            self._notify_status(msg); print(f"AUDIO HANDLER: {msg}")
+            return filepath, None
         except FileNotFoundError as e:
-             # Specifically catch if ffmpeg is likely missing for MP3
-             error_msg = f"Error saving {file_format}: {e}. Is FFmpeg installed and in PATH (for MP3)?"
-             self._notify_status(f"Error saving {file_format}: Check FFmpeg/Permissions.")
-             print(error_msg)
+             error_msg = f"Error saving {file_format}: {e}. Is FFmpeg installed/PATH correct for MP3?"
+             self._notify_status(f"Error saving {file_format}: Check FFmpeg/Permissions."); print(error_msg)
              return None, error_msg
         except Exception as e:
              error_msg = f"Error saving audio file '{filepath}': {e}"
-             self._notify_status(f"Error saving {file_format}.")
-             print(error_msg)
-             import traceback
-             traceback.print_exc()
+             self._notify_status(f"Error saving {file_format}."); print(error_msg)
+             import traceback; traceback.print_exc()
              return None, error_msg
 
     def start_playback(self, audio_data=None):
-        """Plays the provided audio data or the last recorded audio."""
-        if self.playing:
-            print("Already playing.")
+        # ... (same as before) ...
+        if self.playing: return
+        playback_data = audio_data if audio_data is not None else self.audio_data
+        if playback_data is None or len(playback_data) == 0:
+            self._notify_status("No audio data to play."); print("Playback error: No audio data.")
             return
-        if audio_data is None:
-            audio_data = self.audio_data
-
-        if audio_data is None or len(audio_data) == 0:
-            self._notify_status("No audio data to play.")
-            print("Playback error: No audio data.")
-            return
-
-        print(f"Starting playback: Samples={len(audio_data)}, SR={self.sample_rate}")
+        if DEBUG_AUDIO: print(f"AUDIO HANDLER: Starting playback - Samples={len(playback_data)}, SR={self.sample_rate}")
         self.playing = True
-
         try:
             self._notify_status("Playing...")
-            # Play in a blocking way for simplicity here
-            # For non-blocking playback with waveform, a callback approach is needed
-            sd.play(audio_data, self.sample_rate, blocking=True)
-            # Once sd.play finishes (blocking=True):
+            sd.play(playback_data, self.sample_rate, blocking=True)
             self.playing = False
             self._notify_status("Playback finished.")
-            print("Playback finished.")
-
+            if DEBUG_AUDIO: print("AUDIO HANDLER: Playback finished.")
         except Exception as e:
             self.playing = False
-            self._notify_status(f"Error during playback: {e}")
-            print(f"Error during playback: {e}")
+            error_msg = f"Error during playback: {e}"
+            self._notify_status(error_msg); print(f"AUDIO HANDLER ERROR: {error_msg}")
         finally:
-            # Ensure 'playing' state is reset if an error occurs during play
             self.playing = False
-            # Ensure final status update occurs
-            if self.status_callback and not self.recording: # Avoid overwriting recording status
-                 # Use a slight delay to ensure it's the last status update
-                 threading.Timer(0.1, self._notify_status, ["Playback finished or stopped."]).start()
-
 
     def stop_playback(self):
-        """Stops the currently playing audio."""
-        if not self.playing:
-            # print("Not playing.")
-            return
-        print("Stopping playback...")
-        sd.stop() # Stop any active playback
+        # ... (same as before) ...
+        if not self.playing: return
+        if DEBUG_AUDIO: print("AUDIO HANDLER: Stopping playback...")
+        sd.stop()
         self.playing = False
         self._notify_status("Playback stopped.")
-        print("Playback stopped via sd.stop().")
+        if DEBUG_AUDIO: print("AUDIO HANDLER: Playback stopped via sd.stop().")
 
     def get_audio_data_queue(self):
-        """Returns the queue containing audio chunks."""
         return self.audio_queue
 
     def has_recorded_data(self):
-        """Checks if there is recorded data available."""
         return self.audio_data is not None and len(self.audio_data) > 0
 
 # --- END OF FILE audio_handler.py ---
