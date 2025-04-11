@@ -93,7 +93,7 @@ class ModernTranscriptionApp:
     def setup_translations(self):
         # ... (Keep the setup_translations method the same as the previous version) ...
         self.translations = {
-            "it": {
+            "Italiano": {
                 "window_title": "AudioScript - Trascrizione e Registrazione Audio", # Updated Title
                 "app_title": "AudioScript",
                 "app_subtitle": "Trascrizione e Registrazione Audio", # Updated Subtitle
@@ -166,7 +166,7 @@ class ModernTranscriptionApp:
                 "ask_close_title": "Conferma Uscita",
                 "ask_close_message": "Sei sicuro di voler uscire?",
             },
-            "en": {
+            "English": {
                 "window_title": "AudioScript - Audio Transcription & Recording", # Updated Title
                 "app_title": "AudioScript",
                 "app_subtitle": "Audio Transcription & Recording", # Updated Subtitle
@@ -240,7 +240,7 @@ class ModernTranscriptionApp:
                 "ask_close_message": "Are you sure you want to exit?",
             },
              # --- Add French and Chinese translations similarly, including "tab_recorder" ---
-             "fr": {
+             "Francais": {
                 "window_title": "AudioScript - Transcription & Enregistrement Audio",
                 "app_title": "AudioScript",
                 "app_subtitle": "Transcription & Enregistrement Audio",
@@ -313,7 +313,7 @@ class ModernTranscriptionApp:
                 "ask_close_title": "Confirmer la fermeture",
                 "ask_close_message": "Êtes-vous sûr de vouloir quitter ?",
              },
-             "zh": {
+             "中文": {
                 "window_title": "AudioScript - 音频转录与录制",
                 "app_title": "AudioScript",
                 "app_subtitle": "音频转录与录制",
@@ -400,7 +400,7 @@ class ModernTranscriptionApp:
         # ... (translate method remains the same) ...
         lang_code = self.current_language.get()
         # Fallback to English if the key or language is missing
-        return self.translations.get(lang_code, self.translations['en']).get(key, self.translations['en'].get(key, f"<{key}>"))
+        return self.translations.get(lang_code, self.translations['English']).get(key, self.translations['English'].get(key, f"<{key}>"))
 
 
     def setup_ui_styles(self):
@@ -469,10 +469,12 @@ class ModernTranscriptionApp:
         lang_select_frame.grid(row=0, column=2, sticky="e")
         self.lang_select_label = ttk.Label(lang_select_frame, text="")
         self.lang_select_label.pack(side=tk.LEFT, padx=(0, 5))
-        self.lang_options = {"Italiano": "it", "English": "en", "Français": "fr", "中文": "zh"}
+        self.lang_options = {"English": "English", "Italiano": "Italiano", "Français": "Français", "中文": "中文"}
         self.language_selector = ttk.Combobox(lang_select_frame, textvariable=self.current_language,
                                               values=list(self.lang_options.keys()), state="readonly", width=10)
-        initial_lang_name = [name for name, code in self.lang_options.items() if code == self.current_language.get()][0]
+        # Set English as default language
+        self.current_language.set("English")  # Set English code as default
+        initial_lang_name = "English"    # Set English display name as default
         self.language_selector.set(initial_lang_name)
         self.language_selector.bind("<<ComboboxSelected>>", self.on_language_select)
         self.language_selector.pack(side=tk.LEFT)
@@ -703,7 +705,7 @@ class ModernTranscriptionApp:
     # ... (update_progress_state, finalize_ui_state, on_closing) the same as the previous version ...
     def on_language_select(self, event=None):
         selected_display_name = self.language_selector.get()
-        new_lang_code = self.lang_options.get(selected_display_name, "en")
+        new_lang_code = self.lang_options.get(selected_display_name, "English")
         self.current_language.set(new_lang_code)
 
     def change_language(self, *args):
