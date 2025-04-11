@@ -14,8 +14,6 @@ AudioScript è un'applicazione desktop con una GUI moderna (costruita con Tkinte
 
 ![image](https://github.com/user-attachments/assets/6743d78d-4540-4133-ab92-ceaa9a4572dd)
 
-*--(Aggiorna lo screenshot per mostrare entrambe le schede 'Trascrizione' e 'Registra & Riproduci'. Crea una cartella 'images' nel tuo repository.)--*
-
 ---
 
 ## Features
