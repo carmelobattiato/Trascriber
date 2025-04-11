@@ -1,0 +1,4 @@
+# Add these lines to your .gitignore file
+__pycache__/
+*.py[cod]
+*$py.class
